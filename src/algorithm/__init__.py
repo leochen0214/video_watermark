@@ -1,0 +1,1 @@
+"""Algorithm modules for video watermarking."""
