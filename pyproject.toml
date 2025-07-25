@@ -1,22 +1,43 @@
 [project]
 name = "video_watermark"
 version = "0.0.1"
-description = "add watermark for videos"
+description = "Video watermarking application with blind(invisible) watermark support"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = { text = "MIT" }
+authors = [
+    { name = "clong" }
+]
+keywords = ["video", "watermark", "blind-watermark", "invisible watermark", "video watermark", "invisible video watermark"]
 
 dependencies = [
+    # project itself dependencies
+    "Pillow",
+    "qrcode==8.0",
+    "natsort",
+    # algorithm invisible wattermark dependencies
+    "opencv-python==4.8.0.76",
+    "PyWavelets>=1.8.0",
+    "numpy==1.26.4"
 
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "black>=23.0"]
 
+[project.scripts]
+videowatermark = "video_watermark.main:main"
+
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+
+#[tool.setuptools.packages.find]
+#where = ["src"]
+
+[tool.setuptools.package-data]
+video_watermark = ["font/*"]
 
 [tool.setuptools]
 packages = ["video_watermark"]

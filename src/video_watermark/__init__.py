@@ -1,0 +1,1 @@
+"""Video watermarking application with blind watermark support."""
