@@ -77,9 +77,24 @@ def get_compress_audio_options():
     return __get_env('COMPRESS_AUDIO_OPTIONS', '')
 
 
+def get_ffmpeg_options():
+    """Get ffmpeg custom options."""
+    return __get_env('FFMPEG_OPTIONS', '')
+
+def get_result_video_type():
+    """Get result video type, default is mp4."""
+    return __get_env('RESULT_VIDEO_TYPE', '.mp4')
+
+
 def get_upload_timeout() -> int:
     """上传超时时间,默认3600s"""
     return int(__get_env('UPLOAD_TIMEOUT', '3600'))
+
+def get_root_remote_dir():
+    return __get_env('REMOTE_DIR', '/apps/bypy')
+
+def get_current_course_name():
+    return __get_env('CURRENT_COURSE_NAME', '')
 
 
 def __get_env(name, default_val):

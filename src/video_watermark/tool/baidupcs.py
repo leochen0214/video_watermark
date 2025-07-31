@@ -8,7 +8,7 @@ from natsort import natsorted
 
 from ..common import file_operations
 from ..common import environment
-from ..common import async_run
+from ..tool import async_run
 
 # 百度网盘上传工具命令
 BAIDUPCS = "BaiduPCS-Go"

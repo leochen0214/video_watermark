@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from .directories import get_person_video_result_dir
 from .environment import is_test
+from .file_operations import get_files
 
 
 def get_logo_watermark_image(person):
@@ -42,20 +43,20 @@ def get_all_videos(origin_videos_path, person):
     else:
         return sorted_videos
 
+def to_map(videos):
+    m = {}
+    for video in videos:
+        m[video.name] = video
+    return m
 
 def get_videos(video_path):
     """Get videos from path."""
     allowed_extensions = {'.mp4', '.avi', '.mkv', '.wmv', '.mov', '.m4v', '.mp3', ".m4a"}
-    videos = {}
-    vp = Path(video_path)
-    if vp.is_dir():
-        for file in vp.rglob('*'):
-            if (file.is_file() and file.suffix in allowed_extensions
-                    and not file.name.startswith('.') and not file.name.startswith('output')):
-                videos[file.stem] = file
-    else:
-        videos[vp.stem] = vp
-    return videos
+    file_filter = lambda f: (f.is_file()
+                             and not f.name.startswith('.')
+                             and not f.name.startswith('output')
+                             and f.suffix in allowed_extensions)
+    return get_files(video_path, file_filter=file_filter)
 
 
 def is_audio_file(video):

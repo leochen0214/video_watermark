@@ -5,6 +5,7 @@ from .directories import get_video_dir
 from .file_operations import read_all_lines, write_lines_to_file, read_json_file, write_json_to_file
 from .logging_config import get_person_log, get_person_detail_json
 from .environment import is_test
+from .video_operations import to_map
 
 
 def get_person_names():
@@ -49,6 +50,21 @@ def add_video_to_person_detail(video, person):
     logging.info(f"video: {basename} is written to person: {person}")
 
 
+def add_videos_to_person_detail(to_add_videos, person):
+    """Add processed videos to person detail."""
+    if not to_add_videos:
+        return
+    videos = get_person_videos(person)
+    for vd in to_add_videos:
+        if vd not in videos:
+            videos.add(vd)
+    _update_person_videos(person, videos)
+
+
+def is_done_for_person(all_videos, person):
+    return len(get_pending_to_process_videos(all_videos, person)) == 0
+
+
 def is_already_processed(video, person):
     """Check if video is already processed for person."""
     detail_json = get_person_detail_json()
@@ -58,6 +74,20 @@ def is_already_processed(video, person):
     else:
         dataset = set()
     return video.name in dataset
+
+
+def get_pending_to_process_videos(all_videos, person):
+    """Get pending to process videos for person"""
+    if not all_videos:
+        return set()
+    processed_set = get_person_videos(person)
+    all_map = to_map(all_videos)
+    pending_video_names = set(all_map.keys()) - processed_set
+
+    pending_videos = []
+    for name in pending_video_names:
+        pending_videos.append(all_map[name])
+    return pending_videos
 
 
 def get_person_videos(person):

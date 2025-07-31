@@ -2,9 +2,10 @@ from pathlib import Path
 import random
 import cv2
 
+# frnm = 0
 
-frnm=0
-def sampler(video:Path,times=10,peroid=1):
+
+def sampler(video: Path, times=10, peroid=1):
     """
     对视频进行抽帧处理
     :param video:
@@ -16,17 +17,17 @@ def sampler(video:Path,times=10,peroid=1):
     videoc = cv2.VideoCapture(str(video.resolve()))
     frame_count = int(videoc.get(cv2.CAP_PROP_FRAME_COUNT))
     for i in range(int(times)):
-        print("第",i+1,"次采样处理")
-        framenumber = random.randint(1, frame_count)
-        processfr = framenumber #对视频进行随机抽帧
+        print("第", i + 1, "次采样处理")
+        frame_number = random.randint(1, frame_count)
+        processfr = frame_number  # 对视频进行随机抽帧
         for ti in range(int(peroid)):
-            if processfr <= frame_count: #加长取样区间，减少解密难度
-                framelist.append(processfr) #判断帧号是否超出范围
-            processfr = processfr+1
-    framelist = list(set(framelist))
-    return framelist
+            if processfr <= frame_count:  # 加长取样区间，减少解密难度
+                framelist.append(processfr)  # 判断帧号是否超出范围
+            processfr = processfr + 1
+    return list(set(framelist))
 
-def extract_frames(video_path, frame_indexes, output_path="/app/target/processframe",filetype=".jpg"):
+
+def extract_frames(video_path, frame_indexes, output_path="/app/target/processframe", filetype=".jpg"):
     """
     将视频处理后输出为图片
     :param video_path: 视频地址
@@ -47,7 +48,7 @@ def extract_frames(video_path, frame_indexes, output_path="/app/target/processfr
             continue
 
         # 设置当前帧位置
-        video_capture.set(cv2.CAP_PROP_POS_FRAMES, index-1)
+        video_capture.set(cv2.CAP_PROP_POS_FRAMES, index - 1)
 
         # 读取当前帧
         ret, frame = video_capture.read()
@@ -59,3 +60,15 @@ def extract_frames(video_path, frame_indexes, output_path="/app/target/processfr
 
     # 关闭视频文件
     video_capture.release()
+
+
+def get_video_info(video):
+    videoc = cv2.VideoCapture(str(video))
+    # 获取视频的宽度（单位：像素）
+    width = videoc.get(cv2.CAP_PROP_FRAME_WIDTH)
+    # 获取视频的高度（单位：像素）
+    height = videoc.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    frame_count = int(videoc.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = int(videoc.get(cv2.CAP_PROP_FPS))
+    videoc.release()
+    return [width, height, frame_count, fps]

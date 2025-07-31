@@ -4,20 +4,24 @@ import time
 import shutil
 from pathlib import Path
 import logging
+import asyncio
 
 from .. import common
 from .. import core
+from .. import tool
 from . import pils
 from . import videoprocess
-from ..common import command
+from .ffmpeg_processor import FFmpegProcessor
 
 
 class VideoWatermarkProcessor:
     def __init__(self, config):
         """初始化视频处理器"""
         self.config = config
+        self.ffmpeg_processor = FFmpegProcessor(config)
+        self.upload_semaphore = asyncio.Semaphore(3)
 
-    def process_all(self, origin_videos='', persons=None):
+    async def process_all(self, origin_videos='', persons=None):
         """
         为所有人生成水印视频
         """
@@ -26,31 +30,99 @@ class VideoWatermarkProcessor:
             return
 
         origin_videos = origin_videos or str(common.get_video_dir())
+        all_videos = common.get_videos(origin_videos)
+        if not all_videos:
+            return
+
+        invisible_watermark_videos, plain_watermark_videos = self._partition(all_videos)
         logo_title_prefix = self.config['watermark_logo_text']
         for person in persons:
             if common.is_finished(person):
                 logging.info(f"'{person}' is already processed")
             else:
-                self.process_person(logo_title_prefix, person, origin_videos)
-                self.check_missed_videos(person, origin_videos)
+                logging.info(f"Starting video generation for '{person}'")
+                text = f'{logo_title_prefix}{person}'
+                self._initialize_directories(person)
+                self.generate_logo_and_qrcode(person, text, text)
+                course_name = common.get_current_course_name() or all_videos[0].parent.name
+                logging.info(f"Begin to process invisible videos for '{person}'")
+                await self._process_person_invisible_watermark_videos(course_name, invisible_watermark_videos, person)
+                logging.info(f"Finish to process {len(invisible_watermark_videos)} invisible videos for '{person}'")
+                await self._process_person_plain_watermark_videos(course_name, plain_watermark_videos, person)
+                logging.info(f"Finish to process {len(plain_watermark_videos)} plain videos for '{person}'")
+                # 是否完成对person的处理
+                if common.is_done_for_person(all_videos, person):
+                    common.finish(person)
+                    logging.info(f"'Finished course videos: {course_name} for person: '{person}'")
 
-    def process_person(self, logo_title_prefix, person, origin_videos):
-        """
-        处理单个人的视频
-        """
-        # logo text
-        text = f'{logo_title_prefix}{person}'
-        logging.info(f"Starting video generation for '{person}'")
+    def _partition(self, videos):
+        invisible_watermark_videos = []
+        plain_watermark_videos = []
+        for i, video in enumerate(videos):
+            if common.is_need_add_invisible_watermark(i):
+                invisible_watermark_videos.append(video)
+            else:
+                plain_watermark_videos.append(video)
+        return invisible_watermark_videos, plain_watermark_videos
 
-        self.initialize_directories(person)
-        self.generate_logo_and_qrcode(person, text, text)
+    async def _process_person_invisible_watermark_videos(self, course_name, videos, person):
+        """处理暗水印"""
+        pending_videos = common.get_pending_to_process_videos(videos, person)
+        if not pending_videos:
+            return
 
-        videos = common.get_all_videos(origin_videos, person)
-        self.generate_videos(person, videos)
+        processed = []
+        try:
+            for video in pending_videos:
+                success, filename_with_extension = await self.process_single_video_async(person, video, True)
+                if success:
+                    processed.append(video.name)
+                    await self._success_post(course_name, filename_with_extension, person)
+        finally:
+            common.add_videos_to_person_detail(processed, person)
+            logging.info(f"Finished processing {len(processed)} videos for '{person}'")
 
-        logging.info(f"Finished video generation for '{person}'")
+    async def _process_person_plain_watermark_videos(self, course_name, videos, person):
+        """处理明水印"""
+        pending_videos = common.get_pending_to_process_videos(videos, person)
+        if not pending_videos:
+            return
+        tasks = []
+        for video in pending_videos:
+            task = self.process_single_video_async(person, video, False)
+            tasks.append(task)
 
-    def initialize_directories(self, person):
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        processed = []
+        try:
+            for result in results:
+                if isinstance(result, tuple) and len(result) == 2:
+                    success, filename_with_extension = result
+                    if success:
+                        processed.append(filename_with_extension)
+                        await self._success_post(course_name, filename_with_extension, person)
+                elif isinstance(result, Exception):
+                    logging.error(f"处理视频时出错: person: {person}")
+        finally:
+            common.add_videos_to_person_detail(processed, person)
+            logging.info(f"Finished processing {len(processed)} videos for '{person}'")
+
+    async def _success_post(self, course_name, filename_with_extension, person):
+        def upload_success_callback(local_path, remote_file):
+            if common.is_delete_after_upload_success():
+                common.delete_file(local_path)
+                logging.info(f"删除已上传完毕的文件, file: {local_path}")
+
+        if common.is_sync_to_baidu():
+            f = common.get_person_video_result_dir(person).joinpath(filename_with_extension).resolve()
+            if f.exists():
+                remote_dir = f"{common.get_root_remote_dir()}/videos/{course_name}/{person}"
+                await tool.upload_file_with_limit(self.upload_semaphore, f, remote_dir, upload_success_callback)
+            else:
+                logging.info(f"upload file not exists, file: '{f}'")
+
+    def _initialize_directories(self, person):
         """
         初始化必要的目录结构
         """
@@ -82,15 +154,15 @@ class VideoWatermarkProcessor:
         pils.genqrcode(text=qrcode_text, filename=person, pix=4)
         logging.info(f"Generated logo and QR code for {person}")
 
-    def check_missed_videos(self, person, origin_videos):
+    async def check_missed_videos_async(self, person, origin_videos):
         """检查并处理遗漏的视频"""
-        videos = common.get_all_videos(origin_videos, person)
+        videos = common.get_pending_to_process_videos(origin_videos, person)
         if videos:
             logging.info(f"Found {len(videos)} missed videos for {person}")
-            self.generate_videos(person, videos)
+            await self.generate_videos_async(person, videos)
             logging.info(f"Finished processing missed videos for {person}")
 
-    def generate_videos(self, person, videos):
+    async def generate_videos_async(self, person, videos):
         """
         生成带水印的视频
         """
@@ -100,52 +172,34 @@ class VideoWatermarkProcessor:
             if common.is_already_processed(video, person):
                 logging.info(f"Video already processed: {person}, {video.name}")
             else:
-                self.process_single_video(person, video, i)
+                await self.process_single_video_async(person, video, i)
 
         if len(videos) == len([v for v in videos if common.is_already_processed(v, person)]):
             common.finish(person)
             logging.info(f"All videos processed for {person}")
 
-    def process_single_video(self, person, video, index):
+    async def process_single_video_async(self, person, video, add_invisible_watermark=False):
         """
         处理单个视频文件
         """
-        add_invisible_watermark = common.is_need_add_invisible_watermark(index)
-        stage_crf = self.config['crf'] if not add_invisible_watermark else self.config['stage_crf']
-
         # 1. 压缩原视频并添加logo水印图片
-        if not self.compress_with_watermark(person, video, stage_crf, add_invisible_watermark):
-            return False
+        logo = common.get_logo_watermark_image(person).as_posix()
+        filename_with_extension = f"{video.stem}{self.config['result_video_type']}"
+        success = await self.ffmpeg_processor.compress_with_logo(video, person, logo, add_invisible_watermark)
+        if not success:
+            return success, None
 
-        filename = video.stem
-        filename_with_extension = filename + ".mp4"
+        stage1_video = None
         if add_invisible_watermark:
             stage1_video = common.get_person_video_stage_dir(person).joinpath(filename_with_extension)
-            self.process_with_invisible_watermark(person, video.stem, stage1_video)
+            success = await self._process_with_invisible_watermark_async(person, video.stem, stage1_video)
+        if stage1_video and not common.keep_stage1_file():
+            common.delete_file(stage1_video)
+        return success, filename_with_extension
 
-        if common.is_sync_to_baidu():
-            pending_to_upload_file = common.get_person_video_result_dir(person).joinpath(
-                filename_with_extension).resolve()
-            if pending_to_upload_file.exists():
-                pass
-            else:
-                logging.info(f"upload file not exists, file: '{pending_to_upload_file}'")
-
-    def compress_with_watermark(self, person, video, stage_crf, add_invisible_watermark):
-        """压缩视频并添加水印"""
-        return command.compress_with_logo(
-            video, person,
-            scale=self.config['scale'],
-            crf=stage_crf,
-            preset=self.config['stage_preset'],
-            horizontal_speed=self.config['horizontal_speed'],
-            vertical_speed=self.config['vertical_speed'],
-            add_invisible_watermark=add_invisible_watermark
-        )
-
-    def process_with_invisible_watermark(self, person, filename, stage1_video):
+    async def _process_with_invisible_watermark_async(self, person, filename, stage1_video):
         """处理带隐形水印的视频"""
-        success = self.process_video(
+        return await self.process_video_async(
             person,
             common.get_qrcode_image(person),
             stage1_video,
@@ -155,63 +209,37 @@ class VideoWatermarkProcessor:
             preset=self.config['preset']
         )
 
-        if success:
-            common.add_video_to_person_detail(stage1_video, person)
-            logging.info(f"Added invisible watermark successfully: {filename}.mp4, {person}")
-            if not common.keep_stage1_file():
-                common.delete_file(stage1_video)
-        return success
-
-    def process_video(self, person, watermark, video, filename, **kwargs):
+    async def process_video_async(self, person, watermark, video, filename, **kwargs):
         """主处理函数"""
         try:
             # 获取视频元数据
             stats = os.stat(str(video))
-            video_info = command.get_video_info(video)
+            video_info = videoprocess.get_video_info(video)
             frame_count, fps = video_info[2], video_info[3]
-            resolution = f"{int(video_info[0])}x{int(video_info[1])}"
+            # resolution = f"{int(video_info[0])}x{int(video_info[1])}"
 
-            # 准备处理环境
-            self.prepare_processing_environment(person, video, fps)
+            # 提取视频帧
+            await self.ffmpeg_processor.extract_all_frames(person, video, fps)
 
             # 采样和处理帧
             seed = self.generate_seed(kwargs.get('watermarkquality', 35))
             samplelist = videoprocess.sampler(video, kwargs.get('sampletimes', 5), kwargs.get('peroid', 1))
-            watermark_shape = self.process_frames(video, samplelist, seed, watermark)
+            watermark_shape = self._process_frames(video, samplelist, seed, watermark)
 
             # 提取音频
-            if not command.extractaudio(common.get_person_origin_dir(), video):
-                logging.info(f"No audio in video: {video}")
-                return False
+            await self.ffmpeg_processor.extract_audio(common.get_person_origin_dir(), video)
 
             # 合成视频
-            if not command.output(
-                    person,
-                    origin=video,
-                    video=filename,
-                    fps=fps,
-                    mtype=".png",
-                    vtype=".mp4",
-                    crf=kwargs.get('crf', 18),
-                    preset=kwargs.get('preset', 'slow')
-            ):
-                return False
+            await self.ffmpeg_processor.compose_video(person, video, fps, **kwargs)
 
             # 保存元数据
-            self.save_metadata(person, filename, video, stats, frame_count, fps, samplelist,
-                               seed, watermark_shape)
+            self.save_metadata(person, filename, video, stats, frame_count, fps, samplelist, seed, watermark_shape)
             return True
         except Exception as e:
             logging.error(f"Processing failed for {person}, {video}", exc_info=True)
             return False
 
-    def prepare_processing_environment(self, person, video, fps):
-        """准备处理环境"""
-        origin_dir = common.get_person_origin_dir()
-        common.delete_then_create(origin_dir)
-        command.extractall(person, video, fps, ".png")
-
-    def process_frames(self, video, samplelist, seed, watermark):
+    def _process_frames(self, video, samplelist, seed, watermark):
         """处理视频帧"""
         frame_output_dir = common.get_frame_output_dir()
         frame_processed_dir = common.get_frame_processed_dir()
@@ -220,9 +248,8 @@ class VideoWatermarkProcessor:
 
         videoprocess.extract_frames(video, samplelist, frame_output_dir, filetype=".png")
 
-
         origin_dir = common.get_person_origin_dir()
-        watermark_shape=None
+        watermark_shape = None
 
         def process_frame(file: Path):
             nonlocal watermark_shape
@@ -246,10 +273,10 @@ class VideoWatermarkProcessor:
             'algorithm': "image",
             'date': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
             'version': '0.4.4',
-            'videoname': str(video),
-            'freamdata': samplelist,
+            'name': str(video),
+            'sample_frames': samplelist,
             'fps': fps,
-            'totalfream': frame_count,
+            'total_frames': frame_count,
             'metadata': str(stats),
             'seed': seed,
             'shape': watermark_shape
@@ -270,16 +297,16 @@ class VideoWatermarkProcessor:
         common.delete_then_create(recover_dir)
         common.delete_then_create(recover_result_dir)
 
-        recoverdata = common.read_json_file(recoverfile)
-        if not recoverdata:
+        recover_data = common.read_json_file(recoverfile)
+        if not recover_data:
             logging.error(f'Recover file not found: {recoverfile}')
             return
 
-        flist = recoverdata['freamdata']
+        flist = recover_data['sample_frame']
         videoprocess.extract_frames(video, flist, output_path=recover_dir, filetype=".png")
 
         def process_recovery(file: Path):
-            core.decodewatermark_image(file, recover_result_dir, recoverdata['shape'], recoverdata['seed'])
+            core.decodewatermark_image(file, recover_result_dir, recover_data['shape'], recover_data['seed'])
             logging.info(f"解码成功: {file.name}")
 
         common.process_files(recover_dir, process_recovery)
