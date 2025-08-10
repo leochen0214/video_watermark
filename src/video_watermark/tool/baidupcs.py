@@ -93,6 +93,7 @@ async def upload_file(local_path: Path, remote_dir, overwrite=False, upload_succ
 
     remote_file = f"{remote_dir}/{Path(local_path).name}"
     try:
+        logging.info(f"overwrite={overwrite}")
         if overwrite:
             await delete_remote_file(remote_file)
         upload_cmd = f"{BAIDUPCS} upload '{local_path}' '{remote_dir}'"
