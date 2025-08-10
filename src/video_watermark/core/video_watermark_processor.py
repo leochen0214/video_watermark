@@ -20,10 +20,11 @@ class VideoWatermarkProcessor:
         self.config = config
         self.ffmpeg_processor = FFmpegProcessor(config)
         self.upload_semaphore = asyncio.Semaphore(3)
+        self.upload_tasks = set()  # 存储所有上传任务
 
     async def process_all(self, origin_videos='', persons=None):
         """
-        为所有人生成水印视频
+        为所有人生成水印视频（按顺序处理每个人）
         """
         logging.info(f"Processing {len(persons)} people: {persons}")
         if not persons:
@@ -36,24 +37,50 @@ class VideoWatermarkProcessor:
 
         invisible_watermark_videos, plain_watermark_videos = self._partition(all_videos)
         logo_title_prefix = self.config['watermark_logo_text']
+
+        # 按顺序处理每个人
         for person in persons:
             if common.is_finished(person):
                 logging.info(f"'{person}' is already processed")
-            else:
-                logging.info(f"Starting video generation for '{person}'")
-                text = f'{logo_title_prefix}{person}'
-                self._initialize_directories(person)
-                self.generate_logo_and_qrcode(person, text, text)
-                course_name = common.get_current_course_name() or all_videos[0].parent.name
-                logging.info(f"Begin to process invisible videos for '{person}'")
-                await self._process_person_invisible_watermark_videos(course_name, invisible_watermark_videos, person)
-                logging.info(f"Finish to process {len(invisible_watermark_videos)} invisible videos for '{person}'")
-                await self._process_person_plain_watermark_videos(course_name, plain_watermark_videos, person)
-                logging.info(f"Finish to process {len(plain_watermark_videos)} plain videos for '{person}'")
-                # 是否完成对person的处理
-                if common.is_done_for_person(all_videos, person):
-                    common.finish(person)
-                    logging.info(f"'Finished course videos: {course_name} for person: '{person}'")
+                continue
+
+            try:
+                await self._process_person(person, logo_title_prefix, invisible_watermark_videos,
+                                           plain_watermark_videos, all_videos)
+            except Exception as e:
+                logging.error(f"Error processing person '{person}': {e}", exc_info=True)
+                # 继续处理下一个人，而不是中断整个流程
+                continue
+
+        # 等待所有上传任务完成
+        if self.upload_tasks:
+            logging.info(f"Waiting for {len(self.upload_tasks)} upload tasks to complete...")
+            await asyncio.gather(*self.upload_tasks, return_exceptions=True)
+            logging.info("All upload tasks completed")
+
+    async def _process_person(self, person, logo_title_prefix, invisible_watermark_videos,
+                              plain_watermark_videos, all_videos):
+        """处理单个人的所有视频"""
+        logging.info(f"Starting video generation for '{person}'")
+        text = f'{logo_title_prefix}{person}'
+        self._initialize_directories(person)
+        self.generate_logo_and_qrcode(person, text, text)
+        course_name = common.get_current_course_name() or all_videos[0].parent.name
+
+        # 先处理暗水印视频（串行）
+        logging.info(f"Begin to process invisible videos for '{person}'")
+        await self._process_person_invisible_watermark_videos(course_name, invisible_watermark_videos, person)
+        logging.info(f"Finish to process {len(invisible_watermark_videos)} invisible videos for '{person}'")
+
+        # 暗水印处理完成后，再并发处理明水印视频
+        logging.info(f"Begin to process plain videos for '{person}'")
+        await self._process_person_plain_watermark_videos(course_name, plain_watermark_videos, person)
+        logging.info(f"Finish to process {len(plain_watermark_videos)} plain videos for '{person}'")
+
+        # 检查是否完成对person的处理
+        if common.is_done_for_person(all_videos, person):
+            common.finish(person)
+            logging.info(f"'Finished course videos: {course_name} for person: '{person}'")
 
     def _partition(self, videos):
         invisible_watermark_videos = []
@@ -66,7 +93,7 @@ class VideoWatermarkProcessor:
         return invisible_watermark_videos, plain_watermark_videos
 
     async def _process_person_invisible_watermark_videos(self, course_name, videos, person):
-        """处理暗水印"""
+        """处理暗水印视频（串行处理，每个视频处理完成后立即上传）"""
         pending_videos = common.get_pending_to_process_videos(videos, person)
         if not pending_videos:
             return
@@ -74,39 +101,74 @@ class VideoWatermarkProcessor:
         processed = []
         try:
             for video in pending_videos:
-                success, filename_with_extension = await self.process_single_video_async(person, video, True)
+                success, filename_with_extension = await self.process_single_video_async(
+                    person, video, True, course_name
+                )
                 if success:
                     processed.append(video.name)
-                    await self._success_post(course_name, filename_with_extension, person)
         finally:
             common.add_videos_to_person_detail(processed, person)
-            logging.info(f"Finished processing {len(processed)} videos for '{person}'")
+            logging.info(f"Finished processing {len(processed)} invisible videos for '{person}'")
 
     async def _process_person_plain_watermark_videos(self, course_name, videos, person):
-        """处理明水印"""
+        """处理明水印视频（并发处理，每个视频处理完成后立即上传）"""
         pending_videos = common.get_pending_to_process_videos(videos, person)
         if not pending_videos:
             return
-        tasks = []
-        for video in pending_videos:
-            task = self.process_single_video_async(person, video, False)
-            tasks.append(task)
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         processed = []
         try:
+            # 创建所有明水印视频的并发处理任务
+            tasks = []
+            for video in pending_videos:
+                # 为每个视频创建处理任务，处理完成后立即上传
+                task = asyncio.create_task(
+                    self.process_single_video_async(person, video, False, course_name)
+                )
+                tasks.append(task)
+
+            # 等待所有明水印视频处理完成
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
             for result in results:
                 if isinstance(result, tuple) and len(result) == 2:
                     success, filename_with_extension = result
                     if success:
                         processed.append(filename_with_extension)
-                        await self._success_post(course_name, filename_with_extension, person)
                 elif isinstance(result, Exception):
-                    logging.error(f"处理视频时出错: person: {person}")
+                    logging.error(f"处理明水印视频时出错: {result}")
         finally:
+            # 确保即使在程序被终止时，已处理的视频信息也被记录
             common.add_videos_to_person_detail(processed, person)
-            logging.info(f"Finished processing {len(processed)} videos for '{person}'")
+            logging.info(f"Finished processing {len(processed)} plain videos for '{person}'")
+
+    async def process_single_video_async(self, person, video, add_invisible_watermark=False, course_name=None):
+        """
+        处理单个视频文件并立即开始上传任务
+        """
+        # 1. 压缩原视频并添加logo水印图片
+        logo = common.get_logo_watermark_image(person).as_posix()
+        filename_with_extension = f"{video.stem}{self.config['result_video_type']}"
+        success = await self.ffmpeg_processor.compress_with_logo(video, person, logo, add_invisible_watermark)
+        if not success:
+            return success, None
+
+        stage1_video = None
+        if add_invisible_watermark:
+            stage1_video = common.get_person_video_stage_dir(person).joinpath(filename_with_extension)
+            success = await self._process_with_invisible_watermark_async(person, video.stem, stage1_video)
+        if stage1_video and not common.keep_stage1_file():
+            common.delete_file(stage1_video)
+
+        # 如果处理成功且需要上传，立即创建上传任务
+        if success and course_name:
+            upload_task = asyncio.create_task(
+                self._success_post(course_name, filename_with_extension, person)
+            )
+            self.upload_tasks.add(upload_task)
+            upload_task.add_done_callback(lambda t: self.upload_tasks.remove(t))
+
+        return success, filename_with_extension
 
     async def _success_post(self, course_name, filename_with_extension, person):
         def upload_success_callback(local_path, remote_file):
@@ -117,8 +179,8 @@ class VideoWatermarkProcessor:
         if common.is_sync_to_baidu():
             f = common.get_person_video_result_dir(person).joinpath(filename_with_extension).resolve()
             if f.exists():
-                remote_dir = f"{common.get_root_remote_dir()}/videos/{course_name}/{person}"
-                await tool.upload_file_with_limit(self.upload_semaphore, f, remote_dir, upload_success_callback)
+                remote_dir = f"{common.get_root_remote_dir()}/videos/{person}/{course_name}"
+                await tool.upload_file_with_limit(self.upload_semaphore, f, remote_dir, upload_success_callback=upload_success_callback)
             else:
                 logging.info(f"upload file not exists, file: '{f}'")
 
@@ -177,25 +239,6 @@ class VideoWatermarkProcessor:
         if len(videos) == len([v for v in videos if common.is_already_processed(v, person)]):
             common.finish(person)
             logging.info(f"All videos processed for {person}")
-
-    async def process_single_video_async(self, person, video, add_invisible_watermark=False):
-        """
-        处理单个视频文件
-        """
-        # 1. 压缩原视频并添加logo水印图片
-        logo = common.get_logo_watermark_image(person).as_posix()
-        filename_with_extension = f"{video.stem}{self.config['result_video_type']}"
-        success = await self.ffmpeg_processor.compress_with_logo(video, person, logo, add_invisible_watermark)
-        if not success:
-            return success, None
-
-        stage1_video = None
-        if add_invisible_watermark:
-            stage1_video = common.get_person_video_stage_dir(person).joinpath(filename_with_extension)
-            success = await self._process_with_invisible_watermark_async(person, video.stem, stage1_video)
-        if stage1_video and not common.keep_stage1_file():
-            common.delete_file(stage1_video)
-        return success, filename_with_extension
 
     async def _process_with_invisible_watermark_async(self, person, filename, stage1_video):
         """处理带隐形水印的视频"""
@@ -286,27 +329,3 @@ class VideoWatermarkProcessor:
         common.create_dir(metadata_dir)
         common.write_json_to_file(metadata, metadata_dir.joinpath(f'{filename}.json'))
         logging.info(f"Metadata saved for {person}, {filename}")
-
-    @staticmethod
-    def recover(recoverfile: Path, video: Path):
-        """恢复水印"""
-        logging.info(f'Recovering from: {recoverfile}, video: {video}')
-
-        recover_dir = common.get_recover_dir()
-        recover_result_dir = common.get_recover_result_dir()
-        common.delete_then_create(recover_dir)
-        common.delete_then_create(recover_result_dir)
-
-        recover_data = common.read_json_file(recoverfile)
-        if not recover_data:
-            logging.error(f'Recover file not found: {recoverfile}')
-            return
-
-        flist = recover_data['sample_frame']
-        videoprocess.extract_frames(video, flist, output_path=recover_dir, filetype=".png")
-
-        def process_recovery(file: Path):
-            core.decodewatermark_image(file, recover_result_dir, recover_data['shape'], recover_data['seed'])
-            logging.info(f"解码成功: {file.name}")
-
-        common.process_files(recover_dir, process_recovery)
