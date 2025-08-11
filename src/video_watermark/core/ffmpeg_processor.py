@@ -26,7 +26,7 @@ class FFmpegProcessor:
         # 限制加暗水印操作的并发为1
         self._serial_semaphore = asyncio.Semaphore(1)
         # 限制其他ffmpeg操作的并发为2
-        self._general_ffmpeg_semaphore = asyncio.Semaphore(2)
+        self._general_ffmpeg_semaphore = asyncio.Semaphore(common.get_ffmpeg_concurrency())
         self.result_video_type = self.config.get('result_video_type')
 
     async def compress_with_logo(self, video: Path, person: str, logo: str,
