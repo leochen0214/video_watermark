@@ -96,6 +96,9 @@ def get_root_remote_dir():
 def get_current_course_name():
     return __get_env('CURRENT_COURSE_NAME', '')
 
+def get_validity_period():
+    return __get_env('VALIDITY_PERIOD', '7')
+
 def get_ffmpeg_concurrency():
     """Get ffmpeg concurrency number."""
     return int(__get_env('FFMPEG_CONCURRENCY', '2'))

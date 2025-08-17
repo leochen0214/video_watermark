@@ -2,7 +2,7 @@
 
 import logging
 from .directories import get_video_dir
-from .file_operations import read_all_lines, write_lines_to_file, read_json_file, write_json_to_file
+from .file_operations import read_all_lines, write_lines_to_file, read_json_file, write_json_to_file, read_csv_to_dict
 from .logging_config import get_person_log, get_person_detail_json
 from .environment import is_test
 from .video_operations import to_map
@@ -10,11 +10,21 @@ from .video_operations import to_map
 
 def get_person_names():
     """Get list of person names."""
-    lines = read_all_lines(get_video_dir().joinpath("名单.txt"))
-    if is_test():
-        return lines[:1]
+    names = get_person_name_mappings().keys()
+    if names and is_test():
+        return names[:1]
     else:
-        return lines
+        return names
+
+
+def get_person_name_mappings():
+    """
+    Get dict of person name to contact_name
+    :return:
+        dict: person_name作为键，contact_name作为值. eg: {'person1': 'nickname1'}
+    """
+    filepath = get_video_dir().joinpath("名单.txt").resolve().as_posix()
+    return read_csv_to_dict(filepath)
 
 
 def finish(person):

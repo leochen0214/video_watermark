@@ -4,7 +4,9 @@ import json
 import shutil
 import logging
 from pathlib import Path
-from typing import Callable, Optional,List
+import csv
+from io import StringIO
+from typing import Callable, Optional, List
 
 
 def delete_file(filename):
@@ -28,6 +30,11 @@ def delete_then_create(filename):
     delete_file(filename)
     from .directories import create_dir
     create_dir(filename)
+
+
+def write(filename, content):
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(content)
 
 
 def write_lines_to_file(filename, lines):
@@ -71,6 +78,7 @@ def get_file_size(file_path: str | Path) -> int:
     except Exception as e:  # 捕获其他可能的异常（如权限错误等）
         print(f"获取文件大小时出错: {e}")
         return 0
+
 
 def get_files(local_path: str, recursive: bool = True, file_filter: Optional[Callable[[Path], bool]] = None) -> List[
     Path]:
@@ -150,3 +158,42 @@ def has_free_space(f):
     file_size = Path(f).stat().st_size
     logging.info(f"total: {total}, used: {used}, free: {free}, file_size: {file_size}")
     return free > 2 * file_size
+
+
+def read_csv_to_dict(file_path):
+    """
+    读取CSV文件并返回字典映射，跳过注释行（#开头）和空行
+
+    参数:
+        file_path (str): CSV文件路径
+
+    返回:
+        dict: 第一列作为键，第二列作为值（如果只有一列，则值为空字符串）
+    """
+    result = {}
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        # 读取所有非注释行
+        lines = [line for line in f if not line.strip().startswith('#')]
+        content = ''.join(lines).replace('，', ',')  # 替换中文逗号为英文逗号
+
+        # 使用csv模块读取处理后的内容
+        reader = csv.reader(StringIO(content))
+
+        for row in reader:
+            if not row:  # 跳过空行
+                continue
+            key = row[0].strip()  # 第一列作为key
+            value = row[1].strip() if len(row) >= 2 else ""  # 第二列作为value（如果不存在则设为空）
+            result[key] = value
+
+    return result
+
+
+def read_content(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return content
+    except:
+        return None
