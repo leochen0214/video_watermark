@@ -134,6 +134,7 @@ config key and description
 | UPLOAD_TIMEOUT            | Upload timeout, default is 3600 seconds                                                                                                                                                                                       | Optional | 3600          | 3600                                                                    |
 | REMOTE_DIR  | baidu pcs remote dir                                                                                                                                                                                                          | Optional | /apps/bypy    | /apps/bypy                                                              | 
 | DELETE_AFTER_UPLOAD_SUCCESS            | Weather delete local file if upload success. 0-means not delete, 1-means delete                                                                                                                                               | Optional | 0             | 0                                                                       |
+| VALIDITY_PERIOD            | share link expire period, default 7 days                                                                                                                                                                                      | Optional | 7             | 30                                                                      |
 
 ## Project Structure
 

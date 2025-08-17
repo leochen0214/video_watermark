@@ -89,6 +89,13 @@ def get_logging_dir():
     return find_project_root().joinpath("logs").resolve()
 
 
+def get_baidu_dir():
+    """Get baidu directory."""
+    return find_project_root().joinpath("baidu").resolve()
+
+def get_screenshot_dir():
+    return get_baidu_dir().joinpath("screenshots").resolve()
+
 def find_project_root(marker: str = "pyproject.toml") -> Path:
     """向上递归查找包含标记文件的目录"""
     current_dir = Path(__file__).resolve()

@@ -68,6 +68,7 @@ interface/
 origin/
 **/progress.json
 **/yarn.lock
+baidu/
 
 # front end
 npm-debug.log*
