@@ -76,6 +76,9 @@ def get_compress_audio_options():
     """Get audio compression options."""
     return __get_env('COMPRESS_AUDIO_OPTIONS', '')
 
+def is_keep_origin_quality():
+    """keep video origin quality, not compress it"""
+    return __get_env('KEEP_ORIGIN_QUALITY', '0') == '1'
 
 def get_ffmpeg_options():
     """Get ffmpeg custom options."""

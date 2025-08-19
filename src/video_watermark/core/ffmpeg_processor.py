@@ -185,6 +185,8 @@ class FFmpegProcessor:
         result_video = target_dir.joinpath(d.name + '.mp4').as_posix()
         mylist_file = d.joinpath('mylist.txt').as_posix()
         options = ffmpeg_options or '-c:v libx264 -crf 18 -preset slow'
+        if common.is_keep_origin_quality():
+            options = ''
 
         cmd = f"ffmpeg -f concat -safe 0 -i '{mylist_file}' -c:a aac -af afftdn {options} -y '{result_video}'"
         process_id = f"concate_to_mp4_{d.name}"
