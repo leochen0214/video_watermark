@@ -80,6 +80,9 @@ chmod u+x scripts/*.sh
 
 ### Batch concate multi videos into single one
 
+- if you want to keep video origin quality at concate, change `KEEP_ORIGIN_QUALITY=1`
+- otherwise `KEEP_ORIGIN_QUALITY=0`, the program will compress video which makes video size is smaller（recommend）
+
 ```bash
 # use python shell
 python -m video_watermark.concate
@@ -135,6 +138,7 @@ config key and description
 | REMOTE_DIR  | baidu pcs remote dir                                                                                                                                                                                                          | Optional | /apps/bypy    | /apps/bypy                                                              | 
 | DELETE_AFTER_UPLOAD_SUCCESS            | Weather delete local file if upload success. 0-means not delete, 1-means delete                                                                                                                                               | Optional | 0             | 0                                                                       |
 | VALIDITY_PERIOD            | share link expire period, default 7 days                                                                                                                                                                                      | Optional | 7             | 30                                                                      |
+| KEEP_ORIGIN_QUALITY            | weather compress video at concate origin mts video files, default value is 0                                                                                                                                                  | Optional | 0             | 0                                                                       |
 
 ## Project Structure
 
