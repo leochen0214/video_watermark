@@ -3,6 +3,9 @@
 import re
 import logging
 from pathlib import Path
+
+from natsort import natsorted
+
 from .directories import get_person_video_result_dir
 from .environment import is_test
 from .file_operations import get_files
@@ -56,7 +59,9 @@ def get_videos(video_path):
                              and not f.name.startswith('.')
                              and not f.name.startswith('output')
                              and f.suffix in allowed_extensions)
-    return get_files(video_path, file_filter=file_filter)
+    # Get files and apply natural sorting
+    files = get_files(video_path, file_filter=file_filter)
+    return natsorted(files, key=lambda x: x.name)
 
 
 def is_audio_file(video):
