@@ -95,8 +95,11 @@ async def upload_file(local_path: Path, remote_dir, overwrite=False, upload_succ
     try:
         logging.info(f"overwrite={overwrite}")
         if overwrite:
-            await delete_remote_file(remote_file)
-        upload_cmd = f"{BAIDUPCS} upload '{local_path}' '{remote_dir}'"
+            if await is_remote_exists(remote_file):
+                await delete_remote_file(remote_file)
+                await asyncio.sleep(1)
+        options = '--policy overwrite' if overwrite else ''
+        upload_cmd = f'{BAIDUPCS} upload "{local_path}" "{remote_dir}" --norapid {options}'
         return_code, stdout, _ = await async_run(
             upload_cmd,
             timeout=environment.get_upload_timeout(),
@@ -125,7 +128,7 @@ async def upload_file(local_path: Path, remote_dir, overwrite=False, upload_succ
 
 
 async def delete_remote_file(remote_file: str):
-    delete_cmd = f"{BAIDUPCS} rm '{remote_file}'"
+    delete_cmd = f'{BAIDUPCS} rm "{remote_file}"'
     return_code, stdout, _ = await async_run(delete_cmd, capture_output=True)
     return return_code == 0 and "操作成功" in stdout
 
@@ -215,7 +218,7 @@ async def get_remote_file_metadata(remote_file_path: str):
     Returns:
         tuple: (file_name, file_size_bytes)
     """
-    cmd = f"{BAIDUPCS} meta '{remote_file_path}'"
+    cmd = f'{BAIDUPCS} meta "{remote_file_path}"'
     return_code, stdout, _ = await async_run(cmd, capture_output=True)
     lines = stdout.split('\n')
     file_name = ''
@@ -240,7 +243,7 @@ async def ensure_remote_dir_exists(remote_dir: str):
     if await is_remote_exists(remote_dir):
         logging.info(f"remote_dir: '{remote_dir}' is already exists")
     else:
-        cmd = f"{BAIDUPCS} mkdir '{remote_dir}'"
+        cmd = f'{BAIDUPCS} mkdir "{remote_dir}"'
         return_code, _, _ = await async_run(cmd)
         if return_code == 0:
             logging.info(f"create remote_dir: '{remote_dir}' success")
@@ -274,7 +277,7 @@ async def _do_list(remote_dir: str):
        Returns:
            List of parsed file/directory info dictionaries
     """
-    list_cmd = f"{BAIDUPCS} ls '{remote_dir}'"
+    list_cmd = f'{BAIDUPCS} ls "{remote_dir}"'
     return_code, stdout, _ = await async_run(list_cmd, capture_output=True)
     if return_code != 0 or not stdout:
         return []

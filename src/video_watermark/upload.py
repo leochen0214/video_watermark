@@ -53,7 +53,7 @@ async def upload_files_by_type(person, file_type):
     """
 
     def upload_success_callback(local_path, remote_file):
-        if common.is_delete_after_upload_success():
+        if common.is_delete_after_upload_success() and file_type == 'videos':
             common.delete_file(local_path)
             logging.info(f"删除已上传完毕的文件, file: {local_path}")
 
@@ -75,6 +75,7 @@ async def upload_files_by_type(person, file_type):
             SEMAPHORE,
             pending_files,
             lambda _: remote_dir,  # 统一使用固定远程目录
+            overwrite=True,
             upload_success_callback=upload_success_callback
         )
     return True
