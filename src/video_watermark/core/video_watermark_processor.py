@@ -161,13 +161,14 @@ class VideoWatermarkProcessor:
             common.delete_file(stage1_video)
 
         # 如果处理成功且需要上传，立即创建上传任务
-        if success and course_name:
-            upload_task = asyncio.create_task(
-                self._success_post(course_name, filename_with_extension, person)
-            )
-            self.upload_tasks.add(upload_task)
-            upload_task.add_done_callback(lambda t: self.upload_tasks.remove(t))
-
+        if success:
+            common.add_video_to_person_detail(filename_with_extension, person)
+            if course_name:
+                upload_task = asyncio.create_task(
+                    self._success_post(course_name, filename_with_extension, person)
+                )
+                self.upload_tasks.add(upload_task)
+                upload_task.add_done_callback(lambda t: self.upload_tasks.remove(t))
         return success, filename_with_extension
 
     async def _success_post(self, course_name, filename_with_extension, person):

@@ -1,6 +1,7 @@
 """Person management utilities."""
 
 import logging
+from natsort import natsorted
 from .directories import get_video_dir
 from .file_operations import read_all_lines, write_lines_to_file, read_json_file, write_json_to_file, read_csv_to_dict
 from .logging_config import get_person_log, get_person_detail_json
@@ -48,16 +49,15 @@ def _get_person_dataset():
     return set(lines)
 
 
-def add_video_to_person_detail(video, person):
+def add_video_to_person_detail(video: str, person: str):
     """Add processed video to person detail."""
     videos = get_person_videos(person)
-    basename = video.name
-    if basename in videos:
-        logging.info(f"video is already in person_detail.json, video: {basename}, person: {person}")
+    if video in videos:
+        logging.info(f"video is already in person_detail.json, video: {video}, person: {person}")
         return
-    videos.add(basename)
+    videos.add(video)
     _update_person_videos(person, videos)
-    logging.info(f"video: {basename} is written to person: {person}")
+    logging.info(f"video: {video} is written to person: {person}")
 
 
 def add_videos_to_person_detail(to_add_videos, person):
@@ -113,5 +113,5 @@ def _update_person_videos(person, videos):
     """Internal function: update person's video list."""
     detail_json = get_person_detail_json()
     data = read_json_file(detail_json)
-    data[person] = list(videos)
+    data[person] = natsorted(videos) # 使用 natsort 对视频名称进行自然排序
     write_json_to_file(data, detail_json)
