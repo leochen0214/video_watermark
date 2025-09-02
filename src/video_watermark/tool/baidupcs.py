@@ -267,6 +267,12 @@ async def is_remote_exists(remote_file: str) -> bool:
     return return_code == 0 and not "文件或目录不存在" in stdout
 
 
+async def get_list_info(remote_dir: str):
+    list_cmd = f'{BAIDUPCS} ls "{remote_dir}"'
+    return_code, stdout, _ = await async_run(list_cmd, capture_output=True)
+    return stdout
+
+
 async def _do_list(remote_dir: str):
     """
        Internal method to list directory contents from Baidu PCS.

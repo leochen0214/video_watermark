@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Optional, Callable
 
+from video_watermark.check_upload import check_upload
 from . import common
 from . import tool
 
@@ -28,6 +29,7 @@ async def batch_upload():
         except Exception as e:
             logging.error(f"上传人员 {person} 数据失败: {str(e)}", exc_info=True)
 
+    await check_upload()
 
 async def upload_files_for_person(person):
     """上传单个人员的所有文件"""
